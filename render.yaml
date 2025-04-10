@@ -4,6 +4,7 @@ services:
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn back.wsgi
+    rootDir: back 
     envVars:
       - key: DEBUG
         value: "False"
