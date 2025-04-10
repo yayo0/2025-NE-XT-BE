@@ -52,7 +52,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
 
-    'core',
+    'back.core.appps.CoreConfig',
     'graphene_django',
     'corsheaders',
     'social_django',
