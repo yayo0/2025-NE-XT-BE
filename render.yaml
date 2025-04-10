@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: next
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn back.wsgi
+    envVars:
+      - key: DEBUG
+        value: "False"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: next_db_hmk7
+          property: connectionString
