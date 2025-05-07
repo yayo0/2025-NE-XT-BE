@@ -18,8 +18,12 @@ from django.contrib import admin
 from django.urls import path
 from graphene_django.views import GraphQLView
 from django.views.decorators.csrf import csrf_exempt
+from django.http import HttpResponse
+from . import schema 
 
 urlpatterns = [
+    path('', lambda request: HttpResponse("OK")),
+    path('favicon.ico', lambda request: HttpResponse(status=204)),
     path('admin/', admin.site.urls),
-    path('graphql/', csrf_exempt(GraphQLView.as_view(graphiql=True))),
+    path('graphql/', csrf_exempt(GraphQLView.as_view(graphiql=True, schema=schema.schema))),
 ]

@@ -16,21 +16,32 @@ import os
 
 env = environ.Env()
 
+
 BASE_DIR = Path(__file__).resolve().parent.parent
-environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
+if os.environ.get("ENV") != "production":
+    environ.Env.read_env(os.path.join(BASE_DIR, 'back', '.env'))
 
 
 DEBUG = env.bool("DEBUG", default=False)
 SECRET_KEY = env("SECRET_KEY")
+DEEPL_API_KEY = env("DEEPL_API_KEY")
+OPENAI_API_KEY = env("OPENAI_API_KEY")
 
-ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", ".elasticbeanstalk.com", "next-env.eba-fxabq4qd.ap-northeast-2.elasticbeanstalk.com", "*"]
 RENDER_EXTERNAL_HOSTNAME = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
 if RENDER_EXTERNAL_HOSTNAME:
     ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
 
 # DATABASE
 DATABASES = {
-    'default': env.db()
+  'default': {
+    'ENGINE': 'django.db.backends.postgresql',
+    'NAME': os.environ.get('RDS_DB_NAME'),
+    'USER': os.environ.get('RDS_USERNAME'),
+    'PASSWORD': os.environ.get('RDS_PASSWORD'),
+    'HOST': os.environ.get('RDS_HOSTNAME'),
+    'PORT': os.environ.get('RDS_PORT', 5432),
+  }
 }
 
 
@@ -53,14 +64,16 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 
     'back.core.apps.CoreConfig',
+    'back.common.apps.CommonConfig',
+    'back.place.apps.PlaceConfig',
     'graphene_django',
     'corsheaders',
     'social_django',
 ]
 
 MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
+    'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware', 
     'django.middleware.common.CommonMiddleware',
@@ -135,7 +148,10 @@ CORS_ALLOW_ALL_ORIGINS = True
 
 # graphene
 GRAPHENE = {
-  'SCHEMA': 'back.schema.schema'
+    'SCHEMA': 'back.schema.schema',
+    'MIDDLEWARE': [
+        'graphql_jwt.middleware.JSONWebTokenMiddleware',
+    ],
 }
 
 # Default primary key field type
@@ -152,3 +168,11 @@ SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = os.environ.get('GOOGLE_CLIENT_ID')
 SOCIAL_AUTH_GOOGLE_OAUTH2_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
 
 LOGIN_REDIRECT_URL = '/'
+
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = env('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+AUTH_USER_MODEL = 'common.User'

@@ -16,6 +16,8 @@ db.sqlite3
 
 # 환경 변수
 back/.env
+back/settings.py
+back/core/schema.py
 
 # staticfiles (collectstatic 후 생성되는 폴더)
 staticfiles/
@@ -25,3 +27,8 @@ staticfiles/
 *.pot
 *.pyc
 *.swp
+
+# Elastic Beanstalk Files
+.elasticbeanstalk/*
+!.elasticbeanstalk/*.cfg.yml
+!.elasticbeanstalk/*.global.yml
