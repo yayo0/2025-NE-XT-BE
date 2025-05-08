@@ -4,7 +4,7 @@ from django.conf import settings
 from django.core.management import call_command
 from graphene_django import DjangoObjectType
 from openai import OpenAI
-
+from graphene.types.generic import GenericScalar
 from back.place.models import (
   Category, CategoryLog,
   RegionName, RegionLog,
@@ -18,9 +18,7 @@ DEEPL_AUTH_KEY = settings.DEEPL_API_KEY
 OPENAI_API = settings.OPENAI_API_KEY
 client = OpenAI(api_key=OPENAI_API, base_url="https://api.perplexity.ai")
 
-# ---------------------------
-# 🔍 DeepL 번역 함수
-# ---------------------------
+
 def deepl_translate(text: str, source_lang: str, target_lang: str) -> str:
   try:
     res = requests.post(
@@ -38,9 +36,7 @@ def deepl_translate(text: str, source_lang: str, target_lang: str) -> str:
     raise RuntimeError(f'DeepL translation failed: {str(e)}')
 
 
-# ---------------------------
-# 📦 GraphQL 타입 정의
-# ---------------------------
+
 class CategoryType(DjangoObjectType):
   class Meta:
     model = Category
@@ -52,11 +48,11 @@ class RegionNameType(DjangoObjectType):
 class PlaceInfoType(DjangoObjectType):
   class Meta:
     model = PlaceInfo
+  
+  menu_or_ticket_info = GenericScalar()
+  translated_reviews = GenericScalar()
 
 
-# ---------------------------
-# 📘 카테고리 번역
-# ---------------------------
 class TranslateCategory(graphene.Mutation):
   class Arguments:
     text = graphene.String(required=True)
@@ -80,9 +76,6 @@ class TranslateCategory(graphene.Mutation):
     return TranslateCategory(translated_text=translated)
 
 
-# ---------------------------
-# 🗺️ 지역명 번역
-# ---------------------------
 class TranslateRegionToKorean(graphene.Mutation):
   class Arguments:
     text = graphene.String(required=True)
@@ -106,9 +99,6 @@ class TranslateRegionToKorean(graphene.Mutation):
     return TranslateRegionToKorean(translated_text=translated)
 
 
-# ---------------------------
-# 🧭 장소 정보 조회 및 저장
-# ---------------------------
 class GetPlaceInfo(graphene.Mutation):
   class Arguments:
     name = graphene.String(required=True)
@@ -132,13 +122,26 @@ class GetPlaceInfo(graphene.Mutation):
 
       # 프롬프트 구성
       prompt = """
-      당신은 한국 방문 관광객을 위한 맛집 안내 AI입니다.
-      아래의 식당에 대해서 당신이 제공해야 할 것은 음식 종류, 메뉴와 가격, 리뷰입니다.
-      메뉴는 10개, 리뷰는 20개 이상 네이버 검색엔진을 우선적으로 탐색하세요.
-      부가적인 설명은 필요없습니다. 답은 오직 아래의 json 형식으로 답하세요.
-      아래에 제공된 언어로 번역하여 답하세요.
-      코드 블록 기호(```json`) 없이 순수 JSON 텍스트만 출력하세요.
+      당신은 한국을 방문한 외국인 관광객을 위한 식당 안내 AI입니다.
 
+      다음 식당에 대해 아래 정보를 웹(특히 네이버, 블로그, 카페 등)에서 최대한 수집해 주세요:
+      - 음식 종류 (category)
+      - 인기 있는 대표 메뉴 10개 (실제 메뉴 이름과 가격 포함. 가격은 반드시 포함)
+      - 사용자 리뷰 20개 이상 (웹상의 실제 후기 기반으로 생생하게 작성)
+
+      **모든 정보는 사실에 근거해야 하며, 허구로 생성하지 마세요.**
+      **메뉴 이름과 가격은 정확한 표기를 사용하세요.**
+      **리뷰는 실제 사용자 표현에 기반해 다양하고 구체적으로 구성하세요.**
+      **title, category, menu, reviews 항목 모두 아래에 제공된 언어로 작성하세요(반드시).**
+
+      출력은 아래 JSON 형식만 사용하며, 코드 블록 기호(```json`) 없이 순수 JSON 텍스트만 출력하세요.
+      "menu", "reviews" 항목은 반드시 JSON 배열 형식으로 작성하세요.
+      문자열로 감싸거나 escape 처리하지 마세요.
+
+      식당 이름: {name}
+      주소: {address}
+      언어: {language}
+      
       {{
         "title": "식당 이름",
         "category": "음식 종류",
@@ -146,17 +149,16 @@ class GetPlaceInfo(graphene.Mutation):
         "reviews": ["너무 맛있어요.", "청결해요"]
       }}
 
-      식당 이름: {name}
-      주소: {address}
-      언어: {language}
       """.format(name=name, address=address, language=language)
 
       messages = [
         {
           "role": "system",
           "content": (
-            "You are a helpful assistant that only replies in the just specified JSON format. "
-            "No other text or explanation is needed."
+            "You are a professional tourist assistant who always replies only in the requested JSON format. "
+            "You must rely on real, recent web data (especially Naver, blogs, local listings). "
+            "Never invent data. Every item must be filled with the best real-world estimate possible. "
+            "Do not use markdown or explanations — return only raw JSON text."
           ),
         },
         {
@@ -176,6 +178,7 @@ class GetPlaceInfo(graphene.Mutation):
           data = json.loads(content)
         except json.JSONDecodeError:
           raise Exception("Perplexity 응답에서 유효한 JSON을 파싱하지 못했습니다.")
+
 
         place = PlaceInfo.objects.create(
           name=name,
@@ -594,10 +597,6 @@ class InsertCategoryLogs(graphene.Mutation):
       skipped=skipped
     )
 
-
-# ---------------------------
-# ✅ Mutation 등록
-# ---------------------------
 class Mutation(graphene.ObjectType):
   translate_category = TranslateCategory.Field()
   translate_region_to_korean = TranslateRegionToKorean.Field()
@@ -606,14 +605,16 @@ class Mutation(graphene.ObjectType):
   insert_category_logs = InsertCategoryLogs.Field()
 
 
-# ---------------------------
-# 🔍 Query (단일 장소 조회)
-# ---------------------------
 class Query(graphene.ObjectType):
   place_info_by_name = graphene.Field(
     PlaceInfoType,
     name=graphene.String(required=True),
     address=graphene.String(required=True)
+  )
+  get_place_info_by_name = graphene.String(
+    name=graphene.String(required=True),
+    address=graphene.String(required=True),
+    language=graphene.String(required=True)
   )
 
   def resolve_place_info_by_name(self, info, name, address):
@@ -622,3 +623,44 @@ class Query(graphene.ObjectType):
     except PlaceInfo.DoesNotExist:
       return None
 
+  def resolve_get_place_info_by_name(self, info, name, address, language):
+    prompt = """
+      당신은 한국 방문 관광객을 위한 맛집 안내 AI입니다.
+      아래의 식당에 대해서 당신이 제공해야 할 것은 음식 종류, 메뉴와 가격, 리뷰입니다.
+      메뉴는 10개, 리뷰는 20개 이상 네이버 검색엔진을 우선적으로 탐색하세요.
+      부가적인 설명은 필요없습니다. 답은 오직 아래의 json 형식으로 답하세요.
+      아래에 제공된 언어로 번역하여 답하세요.
+      코드 블록 기호(```json`) 없이 순수 JSON 텍스트만 출력하세요.
+
+      {{
+        "title": "식당 이름",
+        "category": "음식 종류",
+        "menu": [{{"name": "치즈버거", "price": "8000원"}}],
+        "reviews": ["너무 맛있어요.", "청결해요"]
+      }}
+
+      식당 이름: {name}
+      주소: {address}
+      언어: {language}
+      """.format(name=name, address=address, language=language)
+
+    messages = [
+      {
+        "role": "system",
+        "content": (
+          "You are a helpful assistant that only replies in the just specified JSON format. "
+          "No other text or explanation is needed."
+        ),
+      },
+      {
+        "role": "user",
+        "content": prompt,
+      },
+    ]
+
+    response = client.chat.completions.create(
+      model="sonar",
+      messages=messages
+    )
+    content = response.choices[0].message.content
+    return content
