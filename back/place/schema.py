@@ -131,7 +131,7 @@ class GetPlaceInfo(graphene.Mutation):
     except PlaceInfo.DoesNotExist:
 
       # 프롬프트 구성
-      prompt = f"""
+      prompt = """
       당신은 한국 방문 관광객을 위한 맛집 안내 AI입니다.
       아래의 식당에 대해서 당신이 제공해야 할 것은 음식 종류, 메뉴와 가격, 리뷰입니다.
       메뉴는 10개, 리뷰는 20개 이상 네이버 검색엔진을 우선적으로 탐색하세요.
@@ -140,16 +140,16 @@ class GetPlaceInfo(graphene.Mutation):
       코드 블록 기호(```json`) 없이 순수 JSON 텍스트만 출력하세요.
 
       {{
-      "title": 식당 이름,
-      "category": 음식 종류,
-      "menu": [{{"치즈버거", "8000원"}}, {{"불고기버거", "7000원"}}, {{"감자튀김", "2000원"}}],
-      "reviews": ["너무 맛있어요.", "청결해요", "좋아요"]
+        "title": "식당 이름",
+        "category": "음식 종류",
+        "menu": [{{"name": "치즈버거", "price": "8000원"}}],
+        "reviews": ["너무 맛있어요.", "청결해요"]
       }}
 
       식당 이름: {name}
       주소: {address}
       언어: {language}
-      """
+      """.format(name=name, address=address, language=language)
 
       messages = [
         {
