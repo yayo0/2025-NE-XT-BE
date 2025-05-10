@@ -1,7 +1,8 @@
 
 from django.db import models
 from django.utils import timezone
-# Create your models here.
+from back.common.models import User
+
 class Category(models.Model):
     korean = models.CharField(max_length=255, unique=True)
     english = models.CharField(max_length=255)
@@ -56,3 +57,39 @@ class PlaceLog(models.Model):
 
     def __str__(self):
         return f"{self.name} / {self.address} at {self.called_at}"
+    
+class UserCategory(models.Model):
+    user = models.ForeignKey(User, related_name="userCategories", on_delete=models.CASCADE)
+    name = models.CharField(max_length=100)
+    color = models.TextField(null=True, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'name')
+
+    def __str__(self):
+        return f"{self.user.email} - {self.name}"
+
+class SavedPlace(models.Model):
+    category = models.ForeignKey(UserCategory, related_name="savedPlaces", on_delete=models.CASCADE)
+    place_id = models.CharField(max_length=100)
+    place_name = models.CharField(max_length=255)
+    address_name = models.CharField(max_length=255, null=True, blank=True)
+    road_address_name = models.CharField(max_length=255, null=True, blank=True)
+    road_address_name_en = models.CharField(max_length=255, null=True, blank=True)
+    phone = models.CharField(max_length=50, null=True, blank=True)
+    category_name = models.CharField(max_length=255, null=True, blank=True)
+    category_name_en = models.CharField(max_length=255, null=True, blank=True)
+    place_url = models.URLField(null=True, blank=True)
+    category_group_code = models.CharField(max_length=50, null=True, blank=True)
+    x = models.CharField(max_length=50, null=True, blank=True)
+    y = models.CharField(max_length=50, null=True, blank=True)
+    lat = models.CharField(max_length=50, null=True, blank=True)
+    lng = models.CharField(max_length=50, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('category', 'place_id')
+
+    def __str__(self):
+        return f"{self.place_name} - {self.category.name}"

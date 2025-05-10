@@ -8,9 +8,10 @@ from graphene.types.generic import GenericScalar
 from back.place.models import (
   Category, CategoryLog,
   RegionName, RegionLog,
-  PlaceInfo, PlaceLog
+  PlaceInfo, PlaceLog,
+  UserCategory, SavedPlace
 )
-
+from graphql_jwt.decorators import login_required
 
 # 🔑 외부 API 설정
 DEEPL_URL = 'https://api-free.deepl.com/v2/translate'
@@ -48,10 +49,28 @@ class RegionNameType(DjangoObjectType):
 class PlaceInfoType(DjangoObjectType):
   class Meta:
     model = PlaceInfo
-  
+
   menu_or_ticket_info = GenericScalar()
   translated_reviews = GenericScalar()
 
+class UserCategoryType(DjangoObjectType):
+  class Meta:
+    model = UserCategory
+
+
+class SavedPlaceType(DjangoObjectType):
+  class Meta:
+    model = SavedPlace
+    fields = '__all__'
+
+  road_address_name_EN = graphene.String()
+  category_name_EN = graphene.String()
+  
+  def resolve_road_address_name_EN(self, info):
+    return self.road_address_name_en
+    
+  def resolve_category_name_EN(self, info):
+    return self.category_name_en
 
 class TranslateCategory(graphene.Mutation):
   class Arguments:
@@ -137,6 +156,7 @@ class GetPlaceInfo(graphene.Mutation):
       출력은 아래 JSON 형식만 사용하며, 코드 블록 기호(```json`) 없이 순수 JSON 텍스트만 출력하세요.
       "menu", "reviews" 항목은 반드시 JSON 배열 형식으로 작성하세요.
       문자열로 감싸거나 escape 처리하지 마세요.
+      반드시 JSON 형식으로만 답하세요!!!
 
       식당 이름: {name}
       주소: {address}
@@ -597,14 +617,225 @@ class InsertCategoryLogs(graphene.Mutation):
       skipped=skipped
     )
 
+
+class CreateUserCategory(graphene.Mutation):
+  class Arguments:
+    name = graphene.String(required=True)
+    color = graphene.String()
+
+  category = graphene.Field(UserCategoryType)
+  message = graphene.String()
+
+  @login_required
+  def mutate(self, info, name, color):
+    user = info.context.user
+    
+    if UserCategory.objects.filter(user=user, name=name).exists():
+      raise Exception("이미 동일한 이름의 카테고리가 존재합니다")
+    
+    category = UserCategory.objects.create(user=user, name=name, color=color)
+    return CreateUserCategory(category=category, message="카테고리가 생성되었습니다")
+
+
+class UpdateUserCategory(graphene.Mutation):
+  class Arguments:
+    id = graphene.ID(required=True)
+    name = graphene.String(required=True)
+    color = graphene.String()
+
+  category = graphene.Field(UserCategoryType)
+  message = graphene.String()
+
+  @login_required
+  def mutate(self, info, id, name, color=None):
+    user = info.context.user
+    
+    try:
+      category = UserCategory.objects.get(id=id, user=user)
+    except UserCategory.DoesNotExist:
+      raise Exception("카테고리를 찾을 수 없습니다")
+      
+    if UserCategory.objects.filter(user=user, name=name).exclude(id=id).exists():
+      raise Exception("이미 동일한 이름의 카테고리가 존재합니다")
+      
+    category.name = name
+    if color is not None:
+      category.color = color
+    category.save()
+    return UpdateUserCategory(category=category, message="카테고리가 수정되었습니다")
+
+
+class DeleteUserCategory(graphene.Mutation):
+  class Arguments:
+    id = graphene.ID(required=True)
+
+  message = graphene.String()
+
+  @login_required
+  def mutate(self, info, id):
+    user = info.context.user
+    
+    try:
+      category = UserCategory.objects.get(id=id, user=user)
+    except UserCategory.DoesNotExist:
+      raise Exception("카테고리를 찾을 수 없습니다")
+      
+    category.delete()
+    return DeleteUserCategory(message="카테고리가 삭제되었습니다")
+
+
+class CreateSavedPlace(graphene.Mutation):
+  class Arguments:
+    category_id = graphene.ID(required=True)
+    place_id = graphene.String(required=True)
+    place_name = graphene.String(required=True)
+    address_name = graphene.String()
+    road_address_name = graphene.String()
+    road_address_name_en = graphene.String()
+    phone = graphene.String()
+    category_name = graphene.String()
+    category_name_en = graphene.String()
+    place_url = graphene.String()
+    category_group_code = graphene.String()
+    x = graphene.String()
+    y = graphene.String()
+    lat = graphene.String()
+    lng = graphene.String()
+
+  place = graphene.Field(SavedPlaceType)
+  message = graphene.String()
+
+  @login_required
+  def mutate(self, info, category_id, place_id, place_name, **kwargs):
+    user = info.context.user
+    
+    try:
+      category = UserCategory.objects.get(id=category_id, user=user)
+    except UserCategory.DoesNotExist:
+      raise Exception("카테고리를 찾을 수 없습니다")
+      
+    # 동일 카테고리에 중복된 place_id가 있는지 확인
+    if SavedPlace.objects.filter(category=category, place_id=place_id).exists():
+      raise Exception("이 카테고리에 이미 동일한 장소가 저장되어 있습니다")
+    
+    place = SavedPlace.objects.create(
+      category=category,
+      place_id=place_id,
+      place_name=place_name,
+      **{k: v for k, v in kwargs.items() if v is not None}
+    )
+    
+    return CreateSavedPlace(place=place, message="장소가 저장되었습니다")
+
+
+class UpdateSavedPlace(graphene.Mutation):
+  class Arguments:
+    id = graphene.ID(required=True)
+    place_name = graphene.String()
+    address_name = graphene.String()
+    road_address_name = graphene.String()
+    road_address_name_en = graphene.String()
+    phone = graphene.String()
+    category_name = graphene.String()
+    category_name_en = graphene.String()
+    place_url = graphene.String()
+    category_group_code = graphene.String()
+    x = graphene.String()
+    y = graphene.String()
+    lat = graphene.String()
+    lng = graphene.String()
+
+  place = graphene.Field(SavedPlaceType)
+  message = graphene.String()
+
+  @login_required
+  def mutate(self, info, id, **kwargs):
+    user = info.context.user
+    
+    try:
+      place = SavedPlace.objects.get(id=id, category__user=user)
+    except SavedPlace.DoesNotExist:
+      raise Exception("저장된 장소를 찾을 수 없습니다")
+    
+    for key, value in kwargs.items():
+      if value is not None:
+        setattr(place, key, value)
+    
+    place.save()
+    return UpdateSavedPlace(place=place, message="장소 정보가 수정되었습니다")
+
+
+class MoveSavedPlace(graphene.Mutation):
+  class Arguments:
+    id = graphene.ID(required=True)
+    new_category_id = graphene.ID(required=True)
+
+  place = graphene.Field(SavedPlaceType)
+  message = graphene.String()
+
+  @login_required
+  def mutate(self, info, id, new_category_id):
+    user = info.context.user
+    
+    try:
+      place = SavedPlace.objects.get(id=id, category__user=user)
+    except SavedPlace.DoesNotExist:
+      raise Exception("저장된 장소를 찾을 수 없습니다")
+      
+    try:
+      new_category = UserCategory.objects.get(id=new_category_id, user=user)
+    except UserCategory.DoesNotExist:
+      raise Exception("대상 카테고리를 찾을 수 없습니다")
+      
+    # 대상 카테고리에 동일한 place_id가 있는지 확인
+    if SavedPlace.objects.filter(category=new_category, place_id=place.place_id).exists():
+      raise Exception("대상 카테고리에 이미 동일한 장소가 저장되어 있습니다")
+    
+    place.category = new_category
+    place.save()
+    return MoveSavedPlace(place=place, message="장소가 다른 카테고리로 이동되었습니다")
+
+
+class DeleteSavedPlace(graphene.Mutation):
+  class Arguments:
+    id = graphene.ID(required=True)
+
+  message = graphene.String()
+
+  @login_required
+  def mutate(self, info, id):
+    user = info.context.user
+    
+    try:
+      place = SavedPlace.objects.get(id=id, category__user=user)
+    except SavedPlace.DoesNotExist:
+      raise Exception("저장된 장소를 찾을 수 없습니다")
+      
+    place.delete()
+    return DeleteSavedPlace(message="저장된 장소가 삭제되었습니다")
+
+
+# Mutation 클래스에 추가
 class Mutation(graphene.ObjectType):
   translate_category = TranslateCategory.Field()
   translate_region_to_korean = TranslateRegionToKorean.Field()
   get_place_info = GetPlaceInfo.Field()
   insert_fixed_categories = InsertFixedCategories.Field()
   insert_category_logs = InsertCategoryLogs.Field()
+  
+  # UserCategory 관련 필드
+  create_user_category = CreateUserCategory.Field()
+  update_user_category = UpdateUserCategory.Field()
+  delete_user_category = DeleteUserCategory.Field()
+  
+  # SavedPlace 관련 필드
+  create_saved_place = CreateSavedPlace.Field()
+  update_saved_place = UpdateSavedPlace.Field()
+  move_saved_place = MoveSavedPlace.Field()
+  delete_saved_place = DeleteSavedPlace.Field()
 
 
+# Query 클래스에 추가
 class Query(graphene.ObjectType):
   place_info_by_name = graphene.Field(
     PlaceInfoType,
@@ -616,6 +847,47 @@ class Query(graphene.ObjectType):
     address=graphene.String(required=True),
     language=graphene.String(required=True)
   )
+  
+  # UserCategory 관련 필드
+  user_categories = graphene.List(UserCategoryType)
+  user_category = graphene.Field(UserCategoryType, id=graphene.ID(required=True))
+  
+  # SavedPlace 관련 필드
+  saved_places_by_category = graphene.List(
+    SavedPlaceType, 
+    category_id=graphene.ID(required=True)
+  )
+  saved_place = graphene.Field(SavedPlaceType, id=graphene.ID(required=True))
+
+  @login_required
+  def resolve_user_categories(self, info):
+    user = info.context.user
+    return UserCategory.objects.filter(user=user).order_by('id')
+  
+  @login_required
+  def resolve_user_category(self, info, id):
+    user = info.context.user
+    try:
+      return UserCategory.objects.get(id=id, user=user)
+    except UserCategory.DoesNotExist:
+      return None
+  
+  @login_required
+  def resolve_saved_places_by_category(self, info, category_id):
+    user = info.context.user
+    try:
+      category = UserCategory.objects.get(id=category_id, user=user)
+      return SavedPlace.objects.filter(category=category).order_by('-created_at')
+    except UserCategory.DoesNotExist:
+      return []
+  
+  @login_required
+  def resolve_saved_place(self, info, id):
+    user = info.context.user
+    try:
+      return SavedPlace.objects.get(id=id, category__user=user)
+    except SavedPlace.DoesNotExist:
+      return None
 
   def resolve_place_info_by_name(self, info, name, address):
     try:

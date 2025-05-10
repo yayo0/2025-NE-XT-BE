@@ -6,6 +6,8 @@ from django.contrib.auth.password_validation import validate_password, Validatio
 from graphql_jwt.decorators import login_required
 from graphene_django import DjangoObjectType
 from rest_framework_simplejwt.tokens import RefreshToken
+import graphql_jwt
+from graphql_jwt.shortcuts import get_token
 
 from back.common.models import EmailVerification
 
@@ -47,7 +49,7 @@ class Register(graphene.Mutation):
     if record.token != token:
       raise Exception('유효하지 않은 인증 토큰입니다.')
 
-    if record.purpose != EmailVerification.REGISTER:
+    if record.purpose != 'register':
       raise Exception('유효하지 않은 인증 요청입니다.')
 
     try:
@@ -68,7 +70,7 @@ class Login(graphene.Mutation):
   message = graphene.String()
   access = graphene.String()
   refresh = graphene.String()
-  user_id = graphene.ID()
+  email = graphene.String()
   name = graphene.String()
 
   def mutate(self, info, email, password):
@@ -79,12 +81,13 @@ class Login(graphene.Mutation):
     if not user:
       raise Exception('이메일 또는 비밀번호가 틀렸습니다.')
 
-    refresh = RefreshToken.for_user(user)
+    token = get_token(user)
+
     return Login(
       message='로그인 성공',
-      access=str(refresh.access_token),
-      refresh=str(refresh),
-      user_id=user.id,
+      access=token,
+      refresh="",
+      email=user.email,
       name=user.name
     )
 
@@ -277,10 +280,13 @@ class Mutation(graphene.ObjectType):
   reset_password = ResetPassword.Field()
   update_username = UpdateUsername.Field()
   delete_account = DeleteAccount.Field()
+  token_auth = graphql_jwt.ObtainJSONWebToken.Field()
+  verify_token = graphql_jwt.Verify.Field()
+  refresh_token = graphql_jwt.Refresh.Field()
 
 class Query(graphene.ObjectType):
   me = graphene.Field(UserType)
 
-  @login_required
+  
   def resolve_me(self, info):
     return info.context.user
