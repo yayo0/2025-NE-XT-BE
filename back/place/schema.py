@@ -65,11 +65,19 @@ class SavedPlaceType(DjangoObjectType):
 
   road_address_name_EN = graphene.String()
   category_name_EN = graphene.String()
+  roadAddressNameEN = graphene.String()
+  categoryNameEN = graphene.String()
   
   def resolve_road_address_name_EN(self, info):
     return self.road_address_name_en
     
   def resolve_category_name_EN(self, info):
+    return self.category_name_en
+    
+  def resolve_roadAddressNameEN(self, info):
+    return self.road_address_name_en
+    
+  def resolve_categoryNameEN(self, info):
     return self.category_name_en
 
 class TranslateCategory(graphene.Mutation):
@@ -141,29 +149,31 @@ class GetPlaceInfo(graphene.Mutation):
 
       # 프롬프트 구성
       prompt = """
-      당신은 한국을 방문한 외국인 관광객을 위한 식당 안내 AI입니다.
+      당신은 한국을 방문한 외국인 관광객을 위한 장소 안내 AI입니다.
 
-      다음 식당에 대해 아래 정보를 웹(특히 네이버, 블로그, 카페 등)에서 최대한 수집해 주세요:
-      - 음식 종류 (category)
-      - 인기 있는 대표 메뉴 10개 (실제 메뉴 이름과 가격 포함. 가격은 반드시 포함)
+      다음 장소에 대해 아래 정보를 웹(특히 네이버, 블로그, 카페 등)에서 최대한 수집해 주세요:
+      - 식당이라면 음식 종류 (category), 장소라면 종류 (category)
+      - 식당이라면 인기 있는 대표 메뉴 10개 (메뉴 이름과 가격 포함), 장소라면 티켓 정보 (menu)
       - 사용자 리뷰 20개 이상 (웹상의 실제 후기 기반으로 생생하게 작성)
+
+      장소 이름: {name}
+      주소: {address}
+      번역 언어: {language}
 
       **모든 정보는 사실에 근거해야 하며, 허구로 생성하지 마세요.**
       **메뉴 이름과 가격은 정확한 표기를 사용하세요.**
       **리뷰는 실제 사용자 표현에 기반해 다양하고 구체적으로 구성하세요.**
-      **title, category, menu, reviews 항목 모두 아래에 제공된 언어로 작성하세요(반드시).**
+      **title, category, menu, reviews 항목에 들어가는 내용은 반드시 번역 언어로 작성하세요.**
 
-      출력은 아래 JSON 형식만 사용하며, 코드 블록 기호(```json`) 없이 순수 JSON 텍스트만 출력하세요.
+      출력은 아래 JSON 형식만 사용하며, 코드 블록 기호(```json```) 없이 순수 JSON 텍스트만 출력하세요.
       "menu", "reviews" 항목은 반드시 JSON 배열 형식으로 작성하세요.
       문자열로 감싸거나 escape 처리하지 마세요.
-      반드시 JSON 형식으로만 답하세요!!!
-
-      식당 이름: {name}
-      주소: {address}
-      언어: {language}
+      반드시 아래 JSON 형식으로만 답하세요.
       
+      해당 장소에 대한 정보가 없는 경우 반드시 빈 문자열로 답하세요.
+
       {{
-        "title": "식당 이름",
+        "title": "장소 이름",
         "category": "음식 종류",
         "menu": [{{"name": "치즈버거", "price": "8000원"}}],
         "reviews": ["너무 맛있어요.", "청결해요"]
@@ -194,10 +204,13 @@ class GetPlaceInfo(graphene.Mutation):
         )
         content = response.choices[0].message.content
 
+        if not content or content.strip() == "":
+          raise Exception("No information available for this place")
+
         try:
           data = json.loads(content)
         except json.JSONDecodeError:
-          raise Exception("Perplexity 응답에서 유효한 JSON을 파싱하지 못했습니다.")
+          raise Exception("Could not parse valid JSON from Perplexity response.")
 
 
         place = PlaceInfo.objects.create(
@@ -217,407 +230,6 @@ class GetPlaceInfo(graphene.Mutation):
 
 
 
-class InsertFixedCategories(graphene.Mutation):
-  message = graphene.String()
-  inserted = graphene.Int()
-  skipped = graphene.Int()
-
-  def mutate(self, info):
-    raw_data = '''
-    음식점 > 한식 > 육류,고기 > 곱창,막창	Restaurant > Korean > Meats, Pork > Gopchang, Makchang
-    음식점 > 한식 > 냉면	Restaurants > Korean > Cold Noodles
-    음식점 > 샤브샤브	Restaurants > Shabu-Shabu
-    음식점 > 중식 > 중국요리	Restaurants > Chinese > Chinese
-    음식점 > 한식 > 찌개,전골	Restaurant > Korean > Jjigae,Hotpot
-    음식점 > 한식 > 순대	Restaurants > Korean > Sundae
-    음식점 > 양식	Restaurant > Forms
-    음식점 > 한식 > 한정식	Restaurants > Korean > Korean Food
-    음식점 > 한식 > 육류,고기 > 닭요리	Restaurant > Korean > Meat, meat > Chicken
-    음식점 > 일식 > 돈까스,우동	Restaurant > Japanese > Tonkatsu,Udon Noodles
-    음식점 > 양식 > 이탈리안	Restaurants > Western > Italian
-    음식점 > 양식 > 피자	Restaurants > Western > Pizza
-    음식점 > 한식 > 육류,고기	Restaurant > Korean > Meat
-    음식점 > 일식 > 초밥,롤	Restaurant > Japanese > Sushi, Rolls
-    음식점 > 한식 > 해물,생선 > 게,대게	Restaurants > Korean > Seafood, Fish > Crab, Snow Crab
-    음식점 > 일식 > 참치회	Restaurants > Japanese > Tuna Sashimi
-    음식점 > 한식	Restaurants > Korean
-    음식점 > 양식 > 햄버거	Restaurants > Forms > Hamburger
-    음식점 > 술집 > 일본식주점	Restaurants > Bars > Japanese Restaurants
-    음식점 > 한식 > 해물,생선 > 추어	Restaurant > Korean > Seafood, Fish > Chuur
-    음식점 > 한식 > 해물,생선	Restaurants > Korean > Seafood, Fish
-    음식점 > 중식	Restaurants > Chinese
-    음식점 > 퓨전요리 > 퓨전일식	Restaurants > Fusion > Fusion Japanese
-    음식점 > 한식 > 해물,생선 > 회	Restaurant > Korean > Seafood, Fish > Sashimi
-    음식점 > 퓨전요리	Restaurants > Fusion
-    음식점 > 양식 > 멕시칸,브라질	Restaurant > Western > Mexican,Brazilian
-    음식점 > 한식 > 해물,생선 > 복어	Restaurants > Korean > Seafood, Fish > Pufferfish
-    음식점 > 중식 > 양꼬치	Restaurants > Chinese > Lamb Skewers
-    여행 > 관광,명소 > 전망대	Travel > Sightseeing, Attractions > Observatories
-    여행 > 관광,명소 > 테마거리	Travel > Sightseeing, attractions > Themed streets
-    여행 > 관광,명소 > 섬 > 섬(내륙)	Travel > Sightseeing, Attractions > Islands > Islands (Inland)
-    여행 > 관광,명소 > 도보여행	Travel > Sightseeing, attractions > Walking tours
-    음식점 > 한식 > 해물,생선 > 아구	Restaurant > Korean > Seafood, Fish > Agu
-    음식점 > 뷔페	Restaurants > Buffets
-    음식점 > 한식 > 육류,고기 > 갈비	Restaurants > Korean > Meat, Pork > Ribs
-    음식점 > 한식 > 수제비	Restaurants > Korean > Sujebi
-    음식점 > 일식 > 일본식라면	Restaurants > Japanese > Japanese Ramen
-    음식점 > 분식 > 떡볶이	Restaurants > Bunsik > Tteokbokki
-    음식점 > 일식	Restaurants > Japanese
-    음식점 > 한식 > 설렁탕	Restaurants > Korean > Seolleongtang
-    음식점 > 한식 > 국수 > 칼국수	Restaurants > Korean > Noodles > Kalguksu
-    음식점 > 한식 > 국수	Restaurants > Korean > Noodles
-    음식점 > 뷔페 > 해산물뷔페 > 쿠우쿠우	Restaurants > Buffet > Seafood Buffet > Koo Koo Koo
-    음식점 > 간식 > 제과,베이커리	Restaurants > Snacks > Confectionery, Bakery
-    음식점 > 한식 > 해물,생선 > 매운탕,해물탕	Restaurant > Korean > Seafood, Fish > Spicy Hot Pot, Seafood Hot Pot
-    여행 > 관광,명소 > 관광농원	Travel > Sightseeing, attractions > Tourist farms
-    여행 > 관광,명소 > 계곡	Travel > Sightseeing, attractions > Valleys
-    여행 > 관광,명소 > 도보여행 > DMZ평화의길	Travel > Sightseeing, Attractions > Walking Tour > DMZ Peace Road
-    여행 > 관광,명소 > 산	Travel > Sightseeing, attractions > Mountains
-    여행 > 관광,명소 > 관광단지	Travel > Sightseeing, attractions > Tourist complexes
-    여행 > 관광,명소 > 도보여행 > 올레길 > 제주올레길	Travel > Sightseeing, Attractions > Walking > Olle-gil > Jeju Olle-gil
-    음식점 > 패스트푸드	Restaurants > Fast Food
-    음식점 > 분식	Restaurants > Meals
-    여행 > 관광,명소 > 저수지	Travel > Sightseeing, attractions > Reservoirs
-    음식점 > 한식 > 육류,고기 > 삼겹살	Restaurants > Korean > Meat, Pork > Pork Belly
-    음식점 > 술집 > 호프,요리주점	Restaurants > Bars > Hops, Cuisine Bars
-    음식점 > 한식 > 감자탕	Restaurants > Korean > Potato Soup
-    음식점 > 한식 > 육류,고기 > 족발,보쌈	Restaurants > Korean > Meats, Pork > Pork Feet, Bossam
-    음식점 > 술집 > 실내포장마차	Restaurants > Bars > Indoor stalls
-    음식점 > 기사식당	Restaurants > Knight's Restaurant
-    음식점 > 양식 > 스테이크,립	Restaurant > Western > Steak, Ribs
-    음식점 > 한식 > 국밥	Restaurants > Korean > Soup
-    '''
-
-    created = 0
-    skipped = 0
-    for line in raw_data.strip().splitlines():
-      if not line.strip():
-        continue
-      parts = line.strip().split('\t')
-      if len(parts) != 2:
-        continue
-      korean, english = parts
-      if Category.objects.filter(korean=korean.strip()).exists():
-        skipped += 1
-        continue
-      Category.objects.create(korean=korean.strip(), english=english.strip())
-      created += 1
-
-    return InsertFixedCategories(
-      message='카테고리 일괄 입력 완료',
-      inserted=created,
-      skipped=skipped
-    )
-
-
-class InsertCategoryLogs(graphene.Mutation):
-  message = graphene.String()
-  inserted = graphene.Int()
-  skipped = graphene.Int()
-
-  def mutate(self, info):
-    raw = '''
-음식점 > 한식 > 냉면
-음식점 > 한식 > 육류,고기
-음식점 > 한식 > 해물,생선 > 아구
-음식점 > 한식 > 육류,고기
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 한식 > 육류,고기
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 뷔페
-음식점 > 한식 > 육류,고기
-음식점 > 한식 > 육류,고기 > 갈비
-음식점 > 한식 > 수제비
-음식점 > 일식 > 일본식라면
-음식점 > 분식 > 떡볶이
-음식점 > 한식 > 해물,생선
-음식점 > 일식
-음식점 > 한식 > 육류,고기 > 갈비
-음식점 > 한식 > 설렁탕
-음식점 > 한식 > 육류,고기 > 갈비
-음식점 > 한식 > 육류,고기 > 갈비
-음식점 > 한식 > 육류,고기 > 갈비
-음식점 > 한식 > 찌개,전골
-음식점 > 한식
-음식점 > 한식
-음식점 > 중식
-음식점 > 한식 > 육류,고기 > 갈비
-음식점 > 한식 > 국수 > 칼국수
-음식점 > 한식 > 해물,생선 > 복어
-음식점 > 한식 > 국수
-음식점 > 한식 > 해물,생선 > 회
-음식점 > 뷔페
-음식점 > 뷔페 > 해산물뷔페 > 쿠우쿠우
-음식점 > 간식 > 제과,베이커리
-음식점 > 한식 > 해물,생선 > 매운탕,해물탕
-음식점 > 한식 > 순대
-음식점 > 간식 > 제과,베이커리
-여행 > 관광,명소 > 관광농원
-여행 > 관광,명소 > 계곡
-여행 > 관광,명소 > 도보여행 > DMZ평화의길
-여행 > 관광,명소 > 관광농원
-여행 > 관광,명소 > 도보여행
-여행 > 관광,명소 > 산
-여행 > 관광,명소 > 관광농원
-여행 > 관광,명소 > 도보여행 > DMZ평화의길
-여행 > 관광,명소 > 계곡
-여행 > 관광,명소 > 도보여행
-여행 > 관광,명소 > 관광단지
-여행 > 관광,명소 > 도보여행 > 올레길 > 제주올레길
-여행 > 관광,명소 > 도보여행 > 올레길 > 제주올레길
-여행 > 관광,명소 > 도보여행 > 올레길 > 제주올레길
-여행 > 관광,명소 > 도보여행 > 올레길 > 제주올레길
-여행 > 관광,명소 > 도보여행 > 올레길 > 제주올레길
-여행 > 관광,명소 > 도보여행 > 올레길 > 제주올레길
-여행 > 관광,명소 > 도보여행 > 올레길 > 제주올레길
-여행 > 관광,명소 > 도보여행 > 올레길 > 제주올레길
-여행 > 관광,명소 > 도보여행 > 올레길 > 제주올레길
-음식점 > 한식 > 해물,생선
-음식점 > 패스트푸드
-음식점 > 한식 > 수제비
-음식점 > 분식
-음식점 > 한식 > 냉면
-음식점 > 한식 > 냉면
-음식점 > 분식
-음식점 > 한식 > 냉면
-음식점 > 한식 > 냉면
-음식점 > 한식 > 국수
-음식점 > 한식 > 해물,생선
-음식점 > 분식
-음식점 > 한식 > 냉면
-음식점 > 한식 > 해물,생선 > 복어
-음식점 > 한식 > 냉면
-음식점 > 패스트푸드
-음식점 > 한식 > 수제비
-음식점 > 분식
-여행 > 관광,명소 > 계곡
-여행 > 관광,명소 > 계곡
-여행 > 관광,명소 > 저수지
-여행 > 관광,명소 > 계곡
-여행 > 관광,명소 > 계곡
-여행 > 관광,명소 > 계곡
-여행 > 관광,명소 > 계곡
-여행 > 관광,명소 > 계곡
-여행 > 관광,명소 > 계곡
-여행 > 관광,명소 > 저수지
-음식점 > 한식 > 국수
-음식점 > 분식
-음식점 > 한식 > 해물,생선 > 복어
-음식점 > 한식 > 냉면
-음식점 > 한식 > 냉면
-음식점 > 한식 > 수제비
-음식점 > 분식
-음식점 > 한식 > 냉면
-음식점 > 한식 > 해물,생선
-음식점 > 패스트푸드
-음식점 > 샤브샤브
-음식점 > 한식 > 찌개,전골
-음식점 > 한식 > 한정식
-음식점 > 양식
-음식점 > 한식 > 순대
-음식점 > 한식 > 냉면
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 한식 > 냉면
-음식점 > 중식 > 중국요리
-음식점 > 한식 > 한정식
-음식점 > 한식 > 냉면
-음식점 > 양식
-음식점 > 중식 > 중국요리
-음식점 > 한식 > 찌개,전골
-음식점 > 한식 > 냉면
-음식점 > 한식 > 순대
-음식점 > 한식 > 한정식
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 한식 > 한정식
-음식점 > 샤브샤브
-음식점 > 양식
-음식점 > 중식 > 중국요리
-음식점 > 한식 > 한정식
-음식점 > 한식 > 순대
-음식점 > 한식 > 냉면
-음식점 > 샤브샤브
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 한식 > 냉면
-음식점 > 한식 > 찌개,전골
-음식점 > 한식 > 한정식
-음식점 > 한식 > 한정식
-음식점 > 한식 > 찌개,전골
-음식점 > 한식 > 한정식
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 양식
-음식점 > 중식 > 중국요리
-음식점 > 한식 > 순대
-음식점 > 샤브샤브
-음식점 > 한식 > 냉면
-음식점 > 한식 > 냉면
-음식점 > 중식 > 중국요리
-음식점 > 한식 > 찌개,전골
-음식점 > 샤브샤브
-음식점 > 한식 > 한정식
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 양식
-음식점 > 한식 > 한정식
-음식점 > 한식 > 냉면
-음식점 > 한식 > 순대
-음식점 > 한식 > 냉면
-음식점 > 한식 > 순대
-음식점 > 한식 > 한정식
-음식점 > 한식 > 찌개,전골
-음식점 > 양식
-음식점 > 한식 > 냉면
-음식점 > 한식 > 냉면
-음식점 > 중식 > 중국요리
-음식점 > 샤브샤브
-음식점 > 한식 > 한정식
-음식점 > 중식 > 중국요리
-음식점 > 한식 > 냉면
-음식점 > 한식 > 순대
-음식점 > 한식 > 냉면
-음식점 > 한식 > 한정식
-음식점 > 샤브샤브
-음식점 > 한식 > 한정식
-음식점 > 한식 > 찌개,전골
-음식점 > 양식
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 중식 > 중국요리
-음식점 > 한식 > 한정식
-음식점 > 한식 > 냉면
-음식점 > 한식 > 찌개,전골
-음식점 > 한식 > 한정식
-음식점 > 샤브샤브
-음식점 > 양식
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 한식 > 순대
-음식점 > 한식 > 냉면
-음식점 > 샤브샤브
-음식점 > 한식 > 찌개,전골
-음식점 > 한식 > 한정식
-음식점 > 중식 > 중국요리
-음식점 > 한식 > 한정식
-음식점 > 한식 > 냉면
-음식점 > 양식
-음식점 > 한식 > 순대
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 한식 > 냉면
-음식점 > 샤브샤브
-음식점 > 한식 > 냉면
-음식점 > 한식 > 찌개,전골
-음식점 > 한식 > 냉면
-음식점 > 한식 > 한정식
-음식점 > 한식 > 한정식
-음식점 > 양식
-음식점 > 중식 > 중국요리
-음식점 > 한식 > 순대
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 한식 > 한정식
-음식점 > 중식 > 중국요리
-음식점 > 한식 > 순대
-음식점 > 한식 > 냉면
-음식점 > 한식 > 냉면
-음식점 > 샤브샤브
-음식점 > 한식 > 찌개,전골
-음식점 > 양식
-음식점 > 한식 > 한정식
-음식점 > 샤브샤브
-음식점 > 한식 > 한정식
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 한식 > 한정식
-음식점 > 한식 > 순대
-음식점 > 한식 > 냉면
-음식점 > 중식 > 중국요리
-음식점 > 한식 > 냉면
-음식점 > 양식
-음식점 > 한식 > 찌개,전골
-음식점 > 중식 > 중국요리
-음식점 > 한식 > 냉면
-음식점 > 한식 > 찌개,전골
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 한식 > 한정식
-음식점 > 한식 > 한정식
-음식점 > 양식
-음식점 > 한식 > 냉면
-음식점 > 샤브샤브
-음식점 > 한식 > 순대
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 샤브샤브
-음식점 > 양식
-음식점 > 중식 > 중국요리
-음식점 > 한식 > 냉면
-음식점 > 한식 > 순대
-음식점 > 한식 > 한정식
-음식점 > 한식 > 찌개,전골
-음식점 > 한식 > 냉면
-음식점 > 한식 > 한정식
-음식점 > 한식 > 육류,고기 > 삼겹살
-음식점 > 양식 > 햄버거
-음식점 > 양식
-음식점 > 간식 > 제과,베이커리
-음식점 > 술집 > 호프,요리주점
-음식점 > 한식 > 감자탕
-음식점 > 술집 > 호프,요리주점
-음식점 > 간식 > 제과,베이커리
-음식점 > 한식 > 육류,고기 > 족발,보쌈
-음식점 > 일식 > 돈까스,우동
-음식점 > 한식 > 감자탕
-음식점 > 한식 > 육류,고기 > 족발,보쌈
-음식점 > 술집 > 호프,요리주점
-음식점 > 한식 > 육류,고기 > 삼겹살
-음식점 > 양식
-음식점 > 양식 > 햄버거
-음식점 > 간식 > 제과,베이커리
-음식점 > 일식 > 돈까스,우동
-음식점 > 술집 > 호프,요리주점
-음식점 > 간식 > 제과,베이커리
-음식점 > 술집 > 실내포장마차
-음식점 > 중식 > 중국요리
-음식점 > 일식 > 돈까스,우동
-음식점 > 기사식당
-음식점 > 한식 > 해물,생선 > 회
-음식점 > 한식 > 감자탕
-음식점 > 양식 > 스테이크,립
-음식점 > 양식 > 이탈리안
-음식점 > 일식 > 일본식라면
-음식점 > 한식 > 냉면
-음식점 > 양식 > 이탈리안
-음식점 > 술집 > 호프,요리주점
-음식점 > 한식 > 육류,고기
-음식점 > 한식 > 국수
-음식점 > 한식 > 육류,고기 > 갈비
-음식점 > 한식 > 육류,고기 > 곱창,막창
-음식점 > 한식 > 육류,고기
-음식점 > 분식
-음식점 > 한식 > 설렁탕
-음식점 > 한식 > 육류,고기
-음식점 > 한식 > 해물,생선
-음식점 > 한식 > 순대
-음식점 > 한식 > 순대
-음식점 > 한식 > 순대
-음식점 > 한식 > 육류,고기 > 삼겹살
-음식점 > 한식
-음식점 > 한식 > 국밥
-    '''
-
-    created = 0
-    skipped = 0
-    for line in raw.strip().splitlines():
-      name = line.strip()
-      if not name:
-        continue
-      if CategoryLog.objects.filter(korean=name).exists():
-        skipped += 1
-        continue
-      CategoryLog.objects.create(korean=name)
-      created += 1
-
-    return InsertCategoryLogs(
-      message='CategoryLog 일괄 추가 완료',
-      inserted=created,
-      skipped=skipped
-    )
-
-
 class CreateUserCategory(graphene.Mutation):
   class Arguments:
     name = graphene.String(required=True)
@@ -631,10 +243,10 @@ class CreateUserCategory(graphene.Mutation):
     user = info.context.user
     
     if UserCategory.objects.filter(user=user, name=name).exists():
-      raise Exception("이미 동일한 이름의 카테고리가 존재합니다")
+      raise Exception("A category with this name already exists")
     
     category = UserCategory.objects.create(user=user, name=name, color=color)
-    return CreateUserCategory(category=category, message="카테고리가 생성되었습니다")
+    return CreateUserCategory(category=category, message="Category created successfully")
 
 
 class UpdateUserCategory(graphene.Mutation):
@@ -653,16 +265,16 @@ class UpdateUserCategory(graphene.Mutation):
     try:
       category = UserCategory.objects.get(id=id, user=user)
     except UserCategory.DoesNotExist:
-      raise Exception("카테고리를 찾을 수 없습니다")
+      raise Exception("Category not found")
       
     if UserCategory.objects.filter(user=user, name=name).exclude(id=id).exists():
-      raise Exception("이미 동일한 이름의 카테고리가 존재합니다")
+      raise Exception("A category with this name already exists")
       
     category.name = name
     if color is not None:
       category.color = color
     category.save()
-    return UpdateUserCategory(category=category, message="카테고리가 수정되었습니다")
+    return UpdateUserCategory(category=category, message="Category updated successfully")
 
 
 class DeleteUserCategory(graphene.Mutation):
@@ -678,10 +290,10 @@ class DeleteUserCategory(graphene.Mutation):
     try:
       category = UserCategory.objects.get(id=id, user=user)
     except UserCategory.DoesNotExist:
-      raise Exception("카테고리를 찾을 수 없습니다")
+      raise Exception("Category not found")
       
     category.delete()
-    return DeleteUserCategory(message="카테고리가 삭제되었습니다")
+    return DeleteUserCategory(message="Category deleted successfully")
 
 
 class CreateSavedPlace(graphene.Mutation):
@@ -712,11 +324,11 @@ class CreateSavedPlace(graphene.Mutation):
     try:
       category = UserCategory.objects.get(id=category_id, user=user)
     except UserCategory.DoesNotExist:
-      raise Exception("카테고리를 찾을 수 없습니다")
+      raise Exception("Category not found")
       
     # 동일 카테고리에 중복된 place_id가 있는지 확인
     if SavedPlace.objects.filter(category=category, place_id=place_id).exists():
-      raise Exception("이 카테고리에 이미 동일한 장소가 저장되어 있습니다")
+      raise Exception("This place is already saved in this category")
     
     place = SavedPlace.objects.create(
       category=category,
@@ -725,7 +337,7 @@ class CreateSavedPlace(graphene.Mutation):
       **{k: v for k, v in kwargs.items() if v is not None}
     )
     
-    return CreateSavedPlace(place=place, message="장소가 저장되었습니다")
+    return CreateSavedPlace(place=place, message="Place saved successfully")
 
 
 class UpdateSavedPlace(graphene.Mutation):
@@ -755,14 +367,14 @@ class UpdateSavedPlace(graphene.Mutation):
     try:
       place = SavedPlace.objects.get(id=id, category__user=user)
     except SavedPlace.DoesNotExist:
-      raise Exception("저장된 장소를 찾을 수 없습니다")
+      raise Exception("Saved place not found")
     
     for key, value in kwargs.items():
       if value is not None:
         setattr(place, key, value)
     
     place.save()
-    return UpdateSavedPlace(place=place, message="장소 정보가 수정되었습니다")
+    return UpdateSavedPlace(place=place, message="Place information updated successfully")
 
 
 class MoveSavedPlace(graphene.Mutation):
@@ -780,20 +392,20 @@ class MoveSavedPlace(graphene.Mutation):
     try:
       place = SavedPlace.objects.get(id=id, category__user=user)
     except SavedPlace.DoesNotExist:
-      raise Exception("저장된 장소를 찾을 수 없습니다")
+      raise Exception("Saved place not found")
       
     try:
       new_category = UserCategory.objects.get(id=new_category_id, user=user)
     except UserCategory.DoesNotExist:
-      raise Exception("대상 카테고리를 찾을 수 없습니다")
+      raise Exception("Target category not found")
       
     # 대상 카테고리에 동일한 place_id가 있는지 확인
     if SavedPlace.objects.filter(category=new_category, place_id=place.place_id).exists():
-      raise Exception("대상 카테고리에 이미 동일한 장소가 저장되어 있습니다")
+      raise Exception("This place already exists in the target category")
     
     place.category = new_category
     place.save()
-    return MoveSavedPlace(place=place, message="장소가 다른 카테고리로 이동되었습니다")
+    return MoveSavedPlace(place=place, message="Place moved to different category successfully")
 
 
 class DeleteSavedPlace(graphene.Mutation):
@@ -809,10 +421,10 @@ class DeleteSavedPlace(graphene.Mutation):
     try:
       place = SavedPlace.objects.get(id=id, category__user=user)
     except SavedPlace.DoesNotExist:
-      raise Exception("저장된 장소를 찾을 수 없습니다")
+      raise Exception("Saved place not found")
       
     place.delete()
-    return DeleteSavedPlace(message="저장된 장소가 삭제되었습니다")
+    return DeleteSavedPlace(message="Saved place deleted successfully")
 
 
 # Mutation 클래스에 추가
@@ -820,8 +432,6 @@ class Mutation(graphene.ObjectType):
   translate_category = TranslateCategory.Field()
   translate_region_to_korean = TranslateRegionToKorean.Field()
   get_place_info = GetPlaceInfo.Field()
-  insert_fixed_categories = InsertFixedCategories.Field()
-  insert_category_logs = InsertCategoryLogs.Field()
   
   # UserCategory 관련 필드
   create_user_category = CreateUserCategory.Field()
@@ -898,20 +508,20 @@ class Query(graphene.ObjectType):
   def resolve_get_place_info_by_name(self, info, name, address, language):
     prompt = """
       당신은 한국 방문 관광객을 위한 맛집 안내 AI입니다.
-      아래의 식당에 대해서 당신이 제공해야 할 것은 음식 종류, 메뉴와 가격, 리뷰입니다.
+      아래의 장소에 대해서 당신이 제공해야 할 것은 종류(장소라면 종류, 식당이라면 음식 종류), 메뉴(장소라면 티켓 정보, 식당이라면 음식)와 가격, 리뷰입니다.
       메뉴는 10개, 리뷰는 20개 이상 네이버 검색엔진을 우선적으로 탐색하세요.
       부가적인 설명은 필요없습니다. 답은 오직 아래의 json 형식으로 답하세요.
       아래에 제공된 언어로 번역하여 답하세요.
-      코드 블록 기호(```json`) 없이 순수 JSON 텍스트만 출력하세요.
+      코드 블록 기호(```json```) 없이 순수 JSON 텍스트만 출력하세요.
 
       {{
-        "title": "식당 이름",
-        "category": "음식 종류",
+        "title": "장소 이름",
+        "category": "종류",
         "menu": [{{"name": "치즈버거", "price": "8000원"}}],
         "reviews": ["너무 맛있어요.", "청결해요"]
       }}
 
-      식당 이름: {name}
+      장소 이름: {name}
       주소: {address}
       언어: {language}
       """.format(name=name, address=address, language=language)

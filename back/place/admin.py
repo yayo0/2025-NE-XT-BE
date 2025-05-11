@@ -2,7 +2,8 @@ from django.contrib import admin
 from back.place.models import (
   Category, RegionName,
   CategoryLog, RegionLog,
-  PlaceInfo, PlaceLog
+  PlaceInfo, PlaceLog,
+  UserCategory, SavedPlace
 )
 
 @admin.register(Category)
@@ -48,4 +49,16 @@ class PlaceLogAdmin(admin.ModelAdmin):
   list_display = [field.name for field in PlaceLog._meta.fields]
   search_fields = ['name', 'address']
   list_filter = ['called_at']
+  ordering = ['-id']
+
+@admin.register(UserCategory)
+class UserCategoryAdmin(admin.ModelAdmin):
+  list_display = [field.name for field in UserCategory._meta.fields]
+  search_fields = ['name']
+  ordering = ['-id']
+
+@admin.register(SavedPlace)
+class SavedPlaceAdmin(admin.ModelAdmin):
+  list_display = [field.name for field in SavedPlace._meta.fields]
+  search_fields = ['place_name']
   ordering = ['-id']

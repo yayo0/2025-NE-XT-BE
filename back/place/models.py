@@ -43,7 +43,7 @@ class PlaceInfo(models.Model):
     translated_reviews = models.JSONField(null=True, blank=True)
 
     class Meta:
-        unique_together = ('name', 'address')
+        unique_together = ('name', 'address', 'language')
 
     def __str__(self):
         return f"{self.name} - {self.address}"
