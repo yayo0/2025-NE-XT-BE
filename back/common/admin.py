@@ -1,16 +1,40 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from back.common.models import User, EmailVerification
 
+class CustomUserChangeForm(UserChangeForm):
+    class Meta:
+        model = User
+        fields = '__all__'
 
-@admin.register(User)
+class CustomUserCreationForm(UserCreationForm):
+    class Meta:
+        model = User
+        fields = ('email', 'name')
+
 class UserAdmin(BaseUserAdmin):
-  list_display = [field.name for field in User._meta.fields if field.name not in ['password']]
-  list_filter = ['is_staff', 'is_superuser', 'is_active']
-  search_fields = ['email', 'name']
-  ordering = ['-id']
+    form = CustomUserChangeForm
+    add_form = CustomUserCreationForm
+    
+    list_display = ('email', 'name', 'is_staff', 'is_active')
+    list_filter = ('is_staff', 'is_active')
+    fieldsets = (
+        (None, {'fields': ('email', 'password')}),
+        ('Personal info', {'fields': ('name',)}),
+        ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
+    )
+    add_fieldsets = (
+        (None, {
+            'classes': ('wide',),
+            'fields': ('email', 'name', 'password1', 'password2'),
+        }),
+    )
+    search_fields = ('email', 'name')
+    ordering = ('email',)
+    filter_horizontal = ('groups', 'user_permissions',)
 
-
+admin.site.register(User, UserAdmin)
 
 @admin.register(EmailVerification)
 class EmailVerificationAdmin(admin.ModelAdmin):

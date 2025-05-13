@@ -3,7 +3,10 @@ from back.place.models import (
   Category, RegionName,
   CategoryLog, RegionLog,
   PlaceInfo, PlaceLog,
-  UserCategory, SavedPlace
+  UserCategory, SavedPlace,
+  PlaceInfoChangeRequest,
+  PlaceReviewByUser,
+  PlaceInfoReviewByUserReport
 )
 
 @admin.register(Category)
@@ -61,4 +64,22 @@ class UserCategoryAdmin(admin.ModelAdmin):
 class SavedPlaceAdmin(admin.ModelAdmin):
   list_display = [field.name for field in SavedPlace._meta.fields]
   search_fields = ['place_name']
+  ordering = ['-id']
+
+@admin.register(PlaceInfoChangeRequest)
+class PlaceInfoChangeRequestAdmin(admin.ModelAdmin):
+  list_display = [field.name for field in PlaceInfoChangeRequest._meta.fields]
+  search_fields = ['user__email', 'place_info__name']
+  ordering = ['-id']
+
+@admin.register(PlaceReviewByUser)
+class PlaceReviewByUserAdmin(admin.ModelAdmin):
+  list_display = [field.name for field in PlaceReviewByUser._meta.fields]
+  search_fields = ['user__email', 'place_info__name']
+  ordering = ['-id']
+
+@admin.register(PlaceInfoReviewByUserReport)
+class PlaceInfoReviewByUserReportAdmin(admin.ModelAdmin):
+  list_display = [field.name for field in PlaceInfoReviewByUserReport._meta.fields]
+  search_fields = ['place_review__place_info__name']
   ordering = ['-id']

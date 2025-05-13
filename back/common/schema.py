@@ -72,6 +72,7 @@ class Login(graphene.Mutation):
   refresh = graphene.String()
   email = graphene.String()
   name = graphene.String()
+  is_staff = graphene.Boolean()
 
   def mutate(self, info, email, password):
     if not re.match(EMAIL_REGEX, email):
@@ -88,7 +89,8 @@ class Login(graphene.Mutation):
       access=token,
       refresh="",
       email=user.email,
-      name=user.name
+      name=user.name,
+      is_staff=user.is_staff
     )
 
 
@@ -115,7 +117,7 @@ class SendVerificationCode(graphene.Mutation):
   <body style="margin:0; padding:0; font-family:Arial,sans-serif; background-color:#f3f4f6">
     <table width="100%" cellpadding="0" cellspacing="0" bgcolor="#f3f4f6">
       <tr>
-        <td align="center">
+        <td align="center" style="padding:60px 0">
           <table width="600" cellpadding="0" cellspacing="0" bgcolor="#ffffff"
             style="border:1px solid #e2e8f0; border-radius:8px; overflow:hidden">
             <tr>
@@ -212,7 +214,7 @@ class SendResetCode(graphene.Mutation):
   <body style="margin:0; padding:0; font-family:Arial,sans-serif; background-color:#f3f4f6">
     <table width="100%" cellpadding="0" cellspacing="0" bgcolor="#f3f4f6">
       <tr>
-        <td align="center">
+        <td align="center" style="padding:60px 0">
           <table width="600" cellpadding="0" cellspacing="0" bgcolor="#ffffff"
             style="border:1px solid #e2e8f0; border-radius:8px; overflow:hidden">
             <tr>
