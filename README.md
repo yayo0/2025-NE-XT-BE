@@ -7,6 +7,7 @@
 
 - **프레임워크**: Django
 - **API**: GraphQL (Graphene)
+- **배포**: AWS EB
 - **데이터 수집**: Perplexity AI
 - **번역 서비스**: DeepL API
 - **이미지 저장**: AWS S3
