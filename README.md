@@ -1,7 +1,7 @@
 
-# Korean Tourism Place Information API
+# KOREAT BE
 
-이 프로젝트는 한국의 장소 정보를 제공하고 다양한 언어로 번역해주는 백엔드 API입니다. 외국인 관광객을 위해 식당, 관광지 등의 정보와 리뷰를 실시간으로 수집하고 번역하여 제공합니다.
+고려대학교 NE-XT 대회에 KOREAT 팀으로 참가한 프로젝트로 한국의 장소 정보를 제공하고 다양한 언어로 번역해주는 웹 사이트의 백엔드입니다. 외국인 관광객을 위해 식당, 관광지 등의 정보와 리뷰를 실시간으로 수집하고 번역하여 제공합니다.
 
 ## 기술 스택
 
@@ -35,7 +35,7 @@ back/
 │   ├── schema.py
 │   ├── tests.py
 │   └── views.py
-├── core/                   # 핵심 기능 앱
+├── core/                   # 초기에 사용햤으나 지금은 사용 X
 │   ├── __pycache__/
 │   ├── migrations/
 │   ├── __init__.py
@@ -106,16 +106,12 @@ python manage.py runserver
 ## 주의사항
 
 - **settings.py** 파일은 보안상의 이유로 저장소에서 제외되었습니다. 직접 설정이 필요합니다.
-- API 키는 `.env` 파일에 저장하고 저장소에 포함하지 마세요.
+- 환경변수는 .env 파일을 이용합니다.
 
 ## API 사용법
 
 GraphQL 엔드포인트: `/graphql/`
 
-주요 쿼리 및 뮤테이션:
-- `getPlaceInfoKorean`: 한국어로 장소 정보 조회
-- `getPlaceInfoTranslated`: 다른 언어로 번역된 장소 정보 조회
-- `translateText`: 텍스트 번역
 
 ## 라이센스
 
