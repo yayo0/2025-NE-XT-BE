@@ -19,6 +19,7 @@ import base64
 import uuid
 import boto3
 from io import BytesIO
+import time
 
 DEEPL_URL = 'https://api-free.deepl.com/v2/translate'
 DEEPL_AUTH_KEY = settings.DEEPL_API_KEY
@@ -42,6 +43,47 @@ def deepl_translate(text: str, source_lang: str, target_lang: str) -> str:
   except Exception as e:
     raise RuntimeError(f'DeepL translation failed: {str(e)}')
 
+
+def get_deepl_language_code(language):
+    """
+    프론트엔드에서 받은 언어 값을 DeepL API에서 사용하는 언어 코드로 변환합니다.
+    """
+    language_map = {
+        # 프론트엔드에서 전달받는 값 기준
+        'English': 'EN',
+        'EN': 'EN',
+        '영어': 'EN',
+        
+        '한국어': 'KO',
+        'KR': 'KO',
+        'ko': 'KO',
+        
+        '日本語': 'JA',
+        'JP': 'JA',
+        '일본어': 'JA',
+        
+        '中文（简体）': 'ZH',
+        'ZH-CN': 'ZH',
+        '중국어(간체)': 'ZH',
+        
+        '中文（繁體）': 'ZH',
+        'ZH-TW': 'ZH',
+        '중국어(번체)': 'ZH',
+        
+        'Español': 'ES',
+        'ES': 'ES',
+        '스페인어': 'ES',
+        
+        'Français': 'FR',
+        'FR': 'FR',
+        '프랑스어': 'FR',
+        
+        'Deutsch': 'DE',
+        'DE': 'DE',
+        '독일어': 'DE',
+    }
+    
+    return language_map.get(language, language)
 
 
 class CategoryType(DjangoObjectType):
@@ -176,7 +218,7 @@ class GetPlaceInfo(graphene.Mutation):
       다음 장소에 대해 아래 정보를 웹(특히 네이버, 블로그, 카페 등)에서 최대한 수집해 주세요:
       - 식당이라면 음식 종류 (category), 장소라면 종류 (category)
       - 식당이라면 인기 있는 대표 메뉴 10개 (메뉴 이름과 가격 포함), 장소라면 티켓 정보 (menu)
-      - 사용자 리뷰 20개 이상 (웹상의 실제 후기 기반으로 생생하게 작성)
+      - 사용자 리뷰 10개 이상 (웹상의 실제 후기 기반으로 생생하게 작성)
 
       장소 이름: {name}
       주소: {address} (없는 경우 장소 이름만으로 검색)
@@ -190,6 +232,7 @@ class GetPlaceInfo(graphene.Mutation):
       "menu", "reviews" 항목은 반드시 JSON 배열 형식으로 작성하세요.
       문자열로 감싸거나 escape 처리하지 마세요.
       반드시 아래 JSON 형식으로만 답하세요.
+      json 형식을 절대 ```로 감싸지 마세요.
     
 
       {{
@@ -222,54 +265,85 @@ class GetPlaceInfo(graphene.Mutation):
         },
       ]
 
-      try:
-        response = client.chat.completions.create(
-          model="sonar",
-          messages=messages
-        )
-        content = response.choices[0].message.content
-
-        if not content or content.strip() == "":
-          raise Exception("No information available for this place")
-
+      max_retries = 3
+      for attempt in range(max_retries):
         try:
-          data = json.loads(content)
-          if not data.get("title") and not data.get("category") and not data.get("menu") and not data.get("reviews") and not data.get("reference_urls"):
+          response = client.chat.completions.create(
+            model="sonar",
+            messages=messages
+          )
+          content = response.choices[0].message.content
+
+          if not content or content.strip() == "":
             raise Exception("No information available for this place")
-          
-        except json.JSONDecodeError:
-          raise Exception("Could not parse valid JSON from Perplexity response.")
 
+          # HTML 응답 체크
+          if "<html" in content.lower() or "<!doctype" in content.lower() or content.strip().startswith("<"):
+            print(f"Received HTML response from API: {content[:200]}...")
+            raise Exception("API returned HTML instead of JSON. Service might be temporarily unavailable or authentication failed.")
 
-        place = PlaceInfo.objects.create(
-          name=name,
-          address=address,
-          language=language,
-          title=data.get("title"),
-          category=data.get("category"),
-          menu_or_ticket_info=data.get("menu"),
-          translated_reviews=data.get("reviews"),
-          reference_urls=data.get("reference_urls")
-        )
+          # 마크다운 코드 블록 제거
+          cleaned_content = content.strip()
+          if cleaned_content.startswith("```json"):
+            cleaned_content = cleaned_content[7:]  # ```json 제거
+          elif cleaned_content.startswith("```"):
+            cleaned_content = cleaned_content[3:]  # ``` 제거
 
-        return GetPlaceInfo(place=place)
+          if cleaned_content.endswith("```"):
+            cleaned_content = cleaned_content[:-3]  # 끝의 ``` 제거
 
-      except Exception as e:
-        raise Exception(f"Perplexity API Error: {str(e)}")
+          # 앞뒤 공백 제거
+          cleaned_content = cleaned_content.strip()
+
+          try:
+            data = json.loads(cleaned_content)
+            if not data.get("title") and not data.get("category") and not data.get("menu") and not data.get("reviews") and not data.get("reference_urls"):
+              raise Exception("No information available for this place")
+            
+          except json.JSONDecodeError:
+            # HTML 응답인지 자세히 확인
+            if "<html" in content or "<!doctype" in content.lower():
+              raise Exception("API returned HTML instead of JSON. Service might be temporarily unavailable or authentication failed.")
+            else:
+              raise Exception(f"Could not parse valid JSON from Perplexity response. {content}")
+
+          place = PlaceInfo.objects.create(
+            name=name,
+            address=address,
+            language=language,
+            title=data.get("title"),
+            category=data.get("category"),
+            menu_or_ticket_info=data.get("menu"),
+            translated_reviews=data.get("reviews"),
+            reference_urls=data.get("reference_urls")
+          )
+
+          return GetPlaceInfo(place=place)
+
+        except Exception as e:
+          if "<html" in str(e) and attempt < max_retries - 1:
+            print(f"Attempt {attempt+1} failed, retrying...")
+            time.sleep(2 * (attempt + 1))  # 지수 백오프
+          else:
+            raise  # 모든 재시도 실패 또는 다른 오류
       
 
 class UpdatePlaceinfo(graphene.Mutation):
   class Arguments:
     id = graphene.ID(required=True)
+    title = graphene.String()
+    category = graphene.String()
     menu_or_ticket_info = graphene.String()
     translated_reviews = graphene.String()
 
   place = graphene.Field(PlaceInfoType)
   message = graphene.String()
   
-  def mutate(self, info, id, menu_or_ticket_info=None, translated_reviews=None):
+  def mutate(self, info, id, title=None, category=None, menu_or_ticket_info=None, translated_reviews=None):
     original_place = PlaceInfo.objects.filter(id=id).first()
     if original_place is not None:
+      original_place.title = title
+      original_place.category = category
       original_place.menu_or_ticket_info = menu_or_ticket_info
       original_place.translated_reviews = translated_reviews
       original_place.save()
@@ -719,10 +793,334 @@ class RejectPlaceInfoReviewByUserReport(graphene.Mutation):
     
     return RejectPlaceInfoReviewByUserReport(message="User report rejected successfully")
 
+class GetPlaceInfoTranslated(graphene.Mutation):
+  class Arguments:
+    name = graphene.String(required=True)
+    language = graphene.String(required=True)
+    address = graphene.String()
+
+  place = graphene.Field(PlaceInfoType)
+
+  def mutate(self, info, name, language, address=None):
+    if not name or not language:
+      raise Exception('Missing name or language')
+    
+    PlaceLog.objects.create(name=name, address=address, language=language)
+
+    try:
+      place = PlaceInfo.objects.get(name=name, address=address, language=language)
+      return GetPlaceInfoTranslated(place=place)
+
+    except PlaceInfo.DoesNotExist:
+
+      prompt = """
+      당신은 한국을 방문한 외국인 관광객을 위한 장소 안내 AI입니다.
+
+      다음 장소에 대해 아래 정보를 웹(특히 네이버, 블로그, 카페 등)에서 최대한 수집해 주세요:
+      - 식당이라면 음식 종류 (category), 장소라면 종류 (category)
+      - 식당이라면 인기 있는 대표 메뉴 10개 (메뉴 이름과 가격 포함), 장소라면 티켓 정보 (menu)
+      - 사용자 리뷰 10개 이상 (웹상의 실제 후기 기반으로 생생하게 작성)
+
+      장소 이름: {name}
+      주소: {address} (없는 경우 장소 이름만으로 검색)
+
+      **모든 정보는 사실에 근거해야 하며, 허구로 생성하지 마세요.**
+      **메뉴 이름과 가격은 정확한 표기를 사용하세요.**
+      **리뷰는 실제 사용자 표현에 기반해 다양하고 구체적으로 구성하세요.**
+      **모든 내용은 반드시 한국어로 작성하세요.**
+
+      출력 형식은 아래 JSON 형식만 사용하며, 코드 블록 기호(```json```) 없이 순수 JSON 텍스트만 출력하세요.
+      "menu", "reviews" 항목은 반드시 JSON 배열 형식으로 작성하세요.
+      문자열로 감싸거나 escape 처리하지 마세요.
+      반드시 아래 JSON 형식으로만 답하세요.
+      json 형식을 절대 ```로 감싸지 마세요.
+    
+      {{
+        "title": "장소 이름",
+        "category": "장소 종류",
+        "menu": [{{"name": "메뉴 이름", "price": "메뉴 가격"}}],
+        "reviews": ["리뷰 1", "리뷰 2"],
+        "reference_urls": ["참조 URL 1", "참조 URL 2"]
+      }}
+
+      **해당 장소에 대한 정보가 없는 경우 반드시 빈 JSON 객체로 답하세요.**
+      **reference_urls 항목에 들어가는 내용은 반드시 웹 주소로 작성하며 모든 출처를 배열 형식으로 작성하세요.**
+      """.format(name=name, address=address)
+
+      messages = [
+        {
+          "role": "system",
+          "content": (
+            "You are a professional tourist assistant who always replies only in the requested JSON format. "
+            "You must rely on real, recent web data (especially Naver, blogs, local listings). "
+            "Never invent data. Every item must be filled with the best real-world estimate possible. "
+            "Do not use markdown or explanations — return only raw JSON text."
+            "Return pure JSON without any code block formatting."
+          ),
+        },
+        {
+          "role": "user",
+          "content": prompt,
+        },
+      ]
+
+      max_retries = 3
+      for attempt in range(max_retries):
+        try:
+          response = client.chat.completions.create(
+            model="sonar",
+            messages=messages
+          )
+          content = response.choices[0].message.content
+
+          if not content or content.strip() == "":
+            raise Exception("No information available for this place")
+
+          # HTML 응답 체크
+          if "<html" in content.lower() or "<!doctype" in content.lower() or content.strip().startswith("<"):
+            print(f"Received HTML response from API: {content[:200]}...")
+            raise Exception("API returned HTML instead of JSON. Service might be temporarily unavailable or authentication failed.")
+
+          # 마크다운 코드 블록 제거
+          cleaned_content = content.strip()
+          if cleaned_content.startswith("```json"):
+            cleaned_content = cleaned_content[7:]  # ```json 제거
+          elif cleaned_content.startswith("```"):
+            cleaned_content = cleaned_content[3:]  # ``` 제거
+
+          if cleaned_content.endswith("```"):
+            cleaned_content = cleaned_content[:-3]  # 끝의 ``` 제거
+
+          # 앞뒤 공백 제거
+          cleaned_content = cleaned_content.strip()
+
+          try:
+            data = json.loads(cleaned_content)
+            if not data.get("title") and not data.get("category") and not data.get("menu") and not data.get("reviews") and not data.get("reference_urls"):
+              raise Exception("No information available for this place")
+            
+          except json.JSONDecodeError:
+            # HTML 응답인지 자세히 확인
+            if "<html" in content or "<!doctype" in content.lower():
+              raise Exception("API returned HTML instead of JSON. Service might be temporarily unavailable or authentication failed.")
+            else:
+              raise Exception(f"Could not parse valid JSON from Perplexity response. {content}")
+
+          if language != 'ko' and language != '한국어' and language != 'KR':
+            target_lang = get_deepl_language_code(language)
+            
+            if data.get("title"):
+              data["title"] = deepl_translate(data["title"], source_lang='KO', target_lang=target_lang)
+            
+            if data.get("category"):
+              data["category"] = deepl_translate(data["category"], source_lang='KO', target_lang=target_lang)
+            
+            if data.get("menu"):
+              translated_menu = []
+              for menu_item in data["menu"]:
+                translated_name = deepl_translate(menu_item["name"], source_lang='KO', target_lang=target_lang)
+                translated_menu.append({"name": translated_name, "price": menu_item["price"]})
+              data["menu"] = translated_menu
+            
+            if data.get("reviews"):
+              translated_reviews = []
+              for review in data["reviews"]:
+                translated_review = deepl_translate(review, source_lang='KO', target_lang=target_lang)
+                translated_reviews.append(translated_review)
+              data["reviews"] = translated_reviews
+
+          place = PlaceInfo.objects.create(
+            name=name,
+            address=address,
+            language=language,
+            title=data.get("title"),
+            category=data.get("category"),
+            menu_or_ticket_info=data.get("menu"),
+            translated_reviews=data.get("reviews"),
+            reference_urls=data.get("reference_urls")
+          )
+
+          return GetPlaceInfoTranslated(place=place)
+
+        except Exception as e:
+          if "<html" in str(e) and attempt < max_retries - 1:
+            print(f"Attempt {attempt+1} failed, retrying...")
+            time.sleep(2 * (attempt + 1))  # 지수 백오프
+          else:
+            raise  # 모든 재시도 실패 또는 다른 오류
+
+class GetPlaceInfoKorean(graphene.Mutation):
+  class Arguments:
+    name = graphene.String(required=True)
+    address = graphene.String()
+    language = graphene.String()
+
+  place = graphene.Field(PlaceInfoType)
+
+  def mutate(self, info, name, address=None, language=None):
+    if not name:
+      raise Exception('Missing name')
+    
+    if not language:
+      language = '한국어'
+    PlaceLog.objects.create(name=name, address=address, language=language)
+
+    try:
+      place = PlaceInfo.objects.get(name=name, address=address, language=language)
+      return GetPlaceInfoKorean(place=place)
+
+    except PlaceInfo.DoesNotExist:
+
+      prompt = """
+      당신은 한국을 방문한 외국인 관광객을 위한 장소 안내 AI입니다.
+
+      다음 장소에 대해 아래 정보를 웹(특히 네이버, 블로그, 카페 등)에서 최대한 수집해 주세요:
+      - 식당이라면 음식 종류 (category), 장소라면 종류 (category)
+      - 식당이라면 인기 있는 대표 메뉴 10개 (메뉴 이름과 가격 포함), 장소라면 티켓 정보 (menu)
+      - 사용자 리뷰 10개 이상 (웹상의 실제 후기 기반으로 생생하게 작성)
+
+      장소 이름: {name}
+      주소: {address} (없는 경우 장소 이름만으로 검색)
+
+      **모든 정보는 사실에 근거해야 하며, 허구로 생성하지 마세요.**
+      **메뉴 이름과 가격은 정확한 표기를 사용하세요.**
+      **리뷰는 실제 사용자 표현에 기반해 다양하고 구체적으로 구성하세요.**
+      **모든 내용은 반드시 한국어로 작성하세요.**
+
+      출력 형식은 아래 JSON 형식만 사용하며, 코드 블록 기호(```json```) 없이 순수 JSON 텍스트만 출력하세요.
+      "menu", "reviews" 항목은 반드시 JSON 배열 형식으로 작성하세요.
+      문자열로 감싸거나 escape 처리하지 마세요.
+      반드시 아래 JSON 형식으로만 답하세요.
+      json 형식을 절대 ```로 감싸지 마세요.
+    
+      {{
+        "title": "장소 이름",
+        "category": "장소 종류",
+        "menu": [{{"name": "메뉴 이름", "price": "메뉴 가격"}}],
+        "reviews": ["리뷰 1", "리뷰 2"],
+        "reference_urls": ["참조 URL 1", "참조 URL 2"]
+      }}
+
+      **해당 장소에 대한 정보가 없는 경우 반드시 빈 JSON 객체로 답하세요.**
+      **reference_urls 항목에 들어가는 내용은 반드시 웹 주소로 작성하며 모든 출처를 배열 형식으로 작성하세요.**
+      """.format(name=name, address=address)
+
+      messages = [
+        {
+          "role": "system",
+          "content": (
+            "You are a professional tourist assistant who always replies only in the requested JSON format. "
+            "You must rely on real, recent web data (especially Naver, blogs, local listings). "
+            "Never invent data. Every item must be filled with the best real-world estimate possible. "
+            "Do not use markdown or explanations — return only raw JSON text."
+            "Return pure JSON without any code block formatting."
+          ),
+        },
+        {
+          "role": "user",
+          "content": prompt,
+        },
+      ]
+
+      max_retries = 3
+      for attempt in range(max_retries):
+        try:
+          response = client.chat.completions.create(
+            model="sonar",
+            messages=messages
+          )
+          content = response.choices[0].message.content
+
+          if not content or content.strip() == "":
+            raise Exception("No information available for this place")
+
+          # HTML 응답 체크
+          if "<html" in content.lower() or "<!doctype" in content.lower() or content.strip().startswith("<"):
+            print(f"Received HTML response from API: {content[:200]}...")
+            raise Exception("API returned HTML instead of JSON. Service might be temporarily unavailable or authentication failed.")
+
+          # 마크다운 코드 블록 제거
+          cleaned_content = content.strip()
+          if cleaned_content.startswith("```json"):
+            cleaned_content = cleaned_content[7:]  # ```json 제거
+          elif cleaned_content.startswith("```"):
+            cleaned_content = cleaned_content[3:]  # ``` 제거
+
+          if cleaned_content.endswith("```"):
+            cleaned_content = cleaned_content[:-3]  # 끝의 ``` 제거
+
+          # 앞뒤 공백 제거
+          cleaned_content = cleaned_content.strip()
+
+          try:
+            data = json.loads(cleaned_content)
+            if not data.get("title") and not data.get("category") and not data.get("menu") and not data.get("reviews") and not data.get("reference_urls"):
+              raise Exception("No information available for this place")
+            
+          except json.JSONDecodeError:
+            # HTML 응답인지 자세히 확인
+            if "<html" in content or "<!doctype" in content.lower():
+              raise Exception("API returned HTML instead of JSON. Service might be temporarily unavailable or authentication failed.")
+            else:
+              raise Exception(f"Could not parse valid JSON from Perplexity response. {content}")
+
+          place = PlaceInfo.objects.create(
+            name=name,
+            address=address,
+            language=language,
+            title=data.get("title"),
+            category=data.get("category"),
+            menu_or_ticket_info=data.get("menu"),
+            translated_reviews=data.get("reviews"),
+            reference_urls=data.get("reference_urls")
+          )
+
+          return GetPlaceInfoKorean(place=place)
+
+        except Exception as e:
+          if "<html" in str(e) and attempt < max_retries - 1:
+            print(f"Attempt {attempt+1} failed, retrying...")
+            time.sleep(2 * (attempt + 1))  # 지수 백오프
+          else:
+            raise  # 모든 재시도 실패 또는 다른 오류
+
+
+class TranslateText(graphene.Mutation):
+  class Arguments:
+    text = graphene.String(required=True)
+    target_language = graphene.String(required=True)
+
+  translated_text = graphene.String()
+  message = graphene.String()
+
+  def mutate(self, info, text, target_language):
+    if not text or not target_language:
+      raise Exception("Missing 'text' or 'target_language' field")
+
+    try:
+      # target_language가 DeepL API에서 사용하는 코드 형식으로 변환
+      target_lang_code = get_deepl_language_code(target_language)
+      
+      # 항상 한국어에서 대상 언어로 번역
+      translated = deepl_translate(text, source_lang='KO', target_lang=target_lang_code)
+      
+      return TranslateText(
+        translated_text=translated,
+        message="Translation successful"
+      )
+    except Exception as e:
+      return TranslateText(
+        translated_text=None,
+        message=f"Translation failed: {str(e)}"
+      )
+
 class Mutation(graphene.ObjectType):
   translate_category = TranslateCategory.Field()
   translate_region_to_korean = TranslateRegionToKorean.Field()
+  translate_text = TranslateText.Field()
   get_place_info = GetPlaceInfo.Field()
+  get_place_info_korean = GetPlaceInfoKorean.Field()
+  get_place_info_translated = GetPlaceInfoTranslated.Field()
   update_placeinfo = UpdatePlaceinfo.Field()
   create_user_category = CreateUserCategory.Field()
   update_user_category = UpdateUserCategory.Field()
@@ -816,7 +1214,7 @@ class Query(graphene.ObjectType):
     prompt = """
       당신은 한국 방문 관광객을 위한 맛집 안내 AI입니다.
       아래의 장소에 대해서 당신이 제공해야 할 것은 종류(장소라면 종류, 식당이라면 음식 종류), 메뉴(장소라면 티켓 정보, 식당이라면 음식)와 가격, 리뷰입니다.
-      메뉴는 10개, 리뷰는 20개 이상 네이버 검색엔진을 우선적으로 탐색하세요.
+      메뉴는 10개, 리뷰는 10개 이상 네이버 검색엔진을 우선적으로 탐색하세요.
       부가적인 설명은 필요없습니다. 답은 오직 아래의 json 형식으로 답하세요.
       아래에 제공된 언어로 번역하여 답하세요.
       코드 블록 기호(```json```) 없이 순수 JSON 텍스트만 출력하세요.

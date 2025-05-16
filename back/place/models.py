@@ -42,6 +42,7 @@ class PlaceInfo(models.Model):
     price = models.CharField(max_length=50, null=True, blank=True)
     translated_reviews = models.JSONField(null=True, blank=True)
     reference_urls = models.JSONField(null=True, blank=True)
+    # is_translated = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ('name', 'language')
