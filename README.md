@@ -107,11 +107,7 @@ python manage.py runserver
 
 - **settings.py** 파일은 보안상의 이유로 저장소에서 제외되었습니다. 직접 설정이 필요합니다.
 - 환경변수는 .env 파일을 이용합니다.
-
-## API 사용법
-
-GraphQL 엔드포인트: `/graphql/`
-
+- 
 
 ## 라이센스
 
